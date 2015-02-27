@@ -1,11 +1,14 @@
 package com.example.cannongame;
 
+import java.util.Arrays;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
 import android.app.DialogFragment;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -30,9 +33,13 @@ public class CannonView extends SurfaceView
    private boolean dialogIsDisplayed = false;   
                
    // constants for game play
-   public static final int TARGET_PIECES = 7; // sections in the target
+   public int target_pieces = 1; // sections in the target
    public static final int MISS_PENALTY = 2; // seconds deducted on a miss
    public static final int HIT_REWARD = 3; // seconds added on a hit
+   
+   private int currLevel = 1;
+   private int finalLevel = 9;
+   private int score = 0;
 
    // variables for the game loop and tracking statistics
    private boolean gameOver; // is the game over?
@@ -103,7 +110,7 @@ public class CannonView extends SurfaceView
       cannonball = new Point(); // create the cannonball as a Point
 
       // initialize hitStates as a boolean array
-      hitStates = new boolean[TARGET_PIECES];
+      hitStates = new boolean[9];
 
       // initialize SoundPool to play the app's three sound effects
       soundPool = new SoundPool(1, AudioManager.STREAM_MUSIC, 0);
@@ -156,7 +163,7 @@ public class CannonView extends SurfaceView
       targetDistance = w * 7 / 8; // target 7/8 screen width from left
       targetBeginning = h / 8; // distance from top 1/8 screen height
       targetEnd = h * 7 / 8; // distance from top 7/8 screen height
-      pieceLength = (targetEnd - targetBeginning) / TARGET_PIECES;
+      pieceLength = (targetEnd - targetBeginning) / target_pieces;
       initialTargetVelocity = -h / 4; // initial target speed multiplier
       target.start = new Point(targetDistance, targetBeginning);
       target.end = new Point(targetDistance, targetEnd);
@@ -179,12 +186,13 @@ public class CannonView extends SurfaceView
    public void newGame()
    {
       // set every element of hitStates to false--restores target pieces
-      for (int i = 0; i < TARGET_PIECES; i++)
+      for (int i = 0; i < target_pieces; i++)
          hitStates[i] = false;
 
+      pieceLength = (targetEnd - targetBeginning) / target_pieces;
       targetPiecesHit = 0; // no target pieces have been hit
-      blockerVelocity = initialBlockerVelocity; // set initial velocity
-      targetVelocity = initialTargetVelocity; // set initial velocity
+      blockerVelocity = initialBlockerVelocity + (float)((currLevel - 1) * 1.1); // set initial velocity
+      targetVelocity = initialTargetVelocity + (float)((currLevel - 1) * 0.75); // set initial velocity
       timeLeft = 10; // start the countdown at 10 seconds
       cannonballOnScreen = false; // the cannonball is not on the screen
       shotsFired = 0; // set the initial number of shots fired
@@ -223,6 +231,7 @@ public class CannonView extends SurfaceView
          {
             cannonballVelocityX *= -1; // reverse cannonball's direction
             timeLeft -= MISS_PENALTY; // penalize the user
+            score -= (15 * currLevel);
 
             // play blocker sound
             soundPool.play(soundMap.get(BLOCKER_SOUND_ID), 1, 1, 1, 0, 1f);
@@ -250,24 +259,38 @@ public class CannonView extends SurfaceView
                (int) ((cannonball.y - target.start.y) / pieceLength);
             
             // check if the piece hasn't been hit yet
-            if ((section >= 0 && section < TARGET_PIECES) && 
+            if ((section >= 0 && section < target_pieces) && 
                !hitStates[section])
             {
                hitStates[section] = true; // section was hit
                cannonballOnScreen = false; // remove cannonball
                timeLeft += HIT_REWARD; // add reward to remaining time
+               score += (10 * currLevel);
 
                // play target hit sound
                soundPool.play(soundMap.get(TARGET_SOUND_ID), 1,
                   1, 1, 0, 1f);
 
                // if all pieces have been hit
-               if (++targetPiecesHit == TARGET_PIECES)
+               if (++targetPiecesHit == target_pieces)
                {
+            	   
                   cannonThread.setRunning(false); // terminate thread
-                  showGameOverDialog(R.string.win); // show winning dialog
                   gameOver = true; 
-               } 
+                  
+                  if (currLevel < finalLevel) {
+                 	  	currLevel++;
+                 	  	target_pieces++;
+                 	  	newGame();
+                 	  	
+                 	  } else {
+                 		currLevel = 1;
+                 		target_pieces = 1;
+                 		insertHighscores(score, R.string.win);
+                 	  	score = 0;
+                 	  }
+                  
+               }
             }
          }
       }
@@ -364,6 +387,10 @@ public class CannonView extends SurfaceView
       // display time remaining
       canvas.drawText(getResources().getString(
          R.string.time_remaining_format, timeLeft), 30, 50, textPaint);
+      canvas.drawText(getResources().getString(
+    	         R.string.score_format, score), 30, 110, textPaint);
+      canvas.drawText(getResources().getString(
+ 	         R.string.level, currLevel), 30, 170, textPaint);
 
       // if a cannonball is currently on the screen, draw it
       if (cannonballOnScreen)
@@ -389,7 +416,7 @@ public class CannonView extends SurfaceView
       currentPoint.y = target.start.y;
 
       // draw the target
-      for (int i = 0; i < TARGET_PIECES; i++)
+      for (int i = 0; i < target_pieces; i++)
       {
          // if this target piece is not hit, draw it
          if (!hitStates[i])
@@ -408,6 +435,81 @@ public class CannonView extends SurfaceView
          currentPoint.y += pieceLength;
       } 
    } // end method drawGameElements
+   
+   private void insertHighscores(int currentScore, final int messageId) {
+	   int[] highscores = new int[6];
+	   int[] orderedHighscores = new int[5];
+	   int counter = 0;
+	   
+	   SharedPreferences savedHighscores = activity.getSharedPreferences("pref", Context.MODE_PRIVATE);
+	   SharedPreferences.Editor preferencesEditor = savedHighscores.edit();
+	  
+	   for (int i = 0; i < 5; i++) {
+		   highscores[i] = savedHighscores.getInt("highscore" + String.valueOf(i), 0);
+	   }
+	  
+	   highscores[5] = currentScore;
+	   Arrays.sort(highscores);
+	  
+	   for (int i = highscores.length - 1; i > 0; i--) {
+		   orderedHighscores[counter] = highscores[i];
+		   counter += 1;
+	   }
+	   
+	   for (int i = 0; i < orderedHighscores.length; i++) {
+		   preferencesEditor.putInt("highscore" + String.valueOf(i), orderedHighscores[i]);
+	   }
+	   
+	   preferencesEditor.apply();
+	   showHighscoresDialog(messageId);
+	   
+	   }
+   
+	   private void showHighscoresDialog(final int messageId) {
+	   
+	   final DialogFragment highScoresDialog = new DialogFragment() {
+	  
+	   @Override
+	   public Dialog onCreateDialog(Bundle bundle) {
+	   int highscores[] = new int[6];
+	   SharedPreferences savedHighscores = activity.getSharedPreferences("pref", Context.MODE_PRIVATE);
+	  
+	   for (int i = 0; i < 5; i++) {
+		   highscores[i] = savedHighscores.getInt("highscore" + String.valueOf(i), 0);
+	   }
+	   
+	   AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
+	   String highScoresString = "";
+	   builder.setTitle("Highscores");
+	  
+	   for (int i = 1; i < 6; i++) {
+		   highScoresString += "Highscore #" + i + ": " + highscores[i - 1] + "\n";
+	   }
+	  
+	   builder.setMessage(highScoresString);
+	   builder.setNeutralButton("Continue", new DialogInterface.OnClickListener() {
+	   
+	   @Override
+	   public void onClick(DialogInterface dialog, int which) {
+		   showGameOverDialog(messageId);
+	   }
+	   
+	   });
+	   
+	   return builder.create();
+	   }
+	   
+	   };
+	   
+	   activity.runOnUiThread(new Runnable() {
+	   
+	   public void run() {
+		   highScoresDialog.setCancelable(false); // modal dialog
+		   highScoresDialog.show(activity.getFragmentManager(), "results");
+	  
+	   	}
+	   });
+	  }
 
    // display an AlertDialog when the game ends
    private void showGameOverDialog(final int messageId)
